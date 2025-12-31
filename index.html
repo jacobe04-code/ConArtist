@@ -16,9 +16,6 @@
         body { font-family: 'Inter', sans-serif; overflow-x: hidden; }
         canvas { touch-action: none; cursor: crosshair; }
         .canvas-container { position: relative; width: 100%; max-width: 800px; aspect-ratio: 4/3; }
-        @media (max-width: 768px) {
-            .canvas-container { aspect-ratio: 1/1; }
-        }
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
@@ -33,7 +30,7 @@
         import { getFirestore, doc, setDoc, onSnapshot, updateDoc, getDoc, deleteDoc, collection } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
 
         const { useState, useEffect, useRef } = React;
-        
+
         // --- CUSTOM SVG ICON COMPONENT ---
         const Icon = ({ name, size = 24, className = "" }) => {
             const icons = {
@@ -49,7 +46,8 @@
                 PaintBucket: <><path d="m19 11-8-8-7 7 8 8 7-7Z"/><path d="m5 10 7 7"/><path d="M7 13v5a2 2 0 0 0 2 2 2 2 0 0 1 2 2"/></>,
                 Undo2: <><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5v0a5.5 5.5 0 0 1-5.5 5.5H11"/></>,
                 Check: <polyline points="20 6 9 17 4 12"/>,
-                Pause: <><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></>
+                Pause: <><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></>,
+                Clock: <><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" /><polyline points="12 6 12 12 16 14" stroke="currentColor" strokeWidth="2" /></>
             };
 
             return (
@@ -81,7 +79,7 @@
   appId: "1:28594153450:web:40c1f697e132c43a113493",
   measurementId: "G-BG2HE0HEZ9"
         };
-        
+
         const appId = 'my-con-artist-production-v1';
 
         const THEMES = ['Cat', 'Tree', 'House', 'Car', 'Sun', 'Flower', 'Bird', 'Fish', 'Pizza', 'Guitar', 'Book', 'Clock', 'Shoe', 'Hat', 'Cup', 'Star', 'Rocket', 'Mountain', 'Butterfly', 'Elephant', 'Cactus', 'Donut', 'Volcano', 'Bicycle', 'Taco', 'Submarine', 'Ghost', 'Alien', 'Robot', 'Pineapple', 'Smartphone', 'Ice Cream', 'Umbrella', 'Pizza Slice', 'Hamburger'];
@@ -130,11 +128,30 @@
             const [lastPoint, setLastPoint] = useState(null);
             const [errorMsg, setErrorMsg] = useState('');
             const canvasRef = useRef(null);
+            const [timeLeft, setTimeLeft] = useState(30);
 
             useEffect(() => {
                 signInAnonymously(auth).catch(e => setErrorMsg("Auth Error: Check Firebase Config"));
                 return onAuthStateChanged(auth, setUser);
             }, []);
+
+            useEffect(() => {
+                if (!gameState || gameState.phase !== 'drawing') return;
+                const interval = setInterval(() => {
+                    if (gameState.turnExpiresAt) {
+                        const remaining = Math.max(0, Math.ceil((gameState.turnExpiresAt - Date.now()) / 1000));
+                        setTimeLeft(remaining);
+
+                        if (remaining === 0 && gameState.currentDrawer === user?.uid) {
+                            finishTurn();
+                        }
+                        if ((gameState.turnExpiresAt - Date.now()) < -5000 && gameState.hostId === user?.uid) {
+                             finishTurn();
+                        }
+                    }
+                }, 1000);
+                return () => clearInterval(interval);
+            }, [gameState, user]);
 
             useEffect(() => {
                 if (!user || !gameId) return;
@@ -196,14 +213,14 @@
                 const theme = THEMES[Math.floor(Math.random() * THEMES.length)];
                 const conId = gameState.players[Math.floor(Math.random() * gameState.players.length)].id;
                 await updateDoc(doc(db, 'games', gameId), {
-                    phase: 'drawing', theme, conId, currentDrawer: gameState.players[0].id, drawerIndex: 0, round: 1, history: [], isPaused: false
+                    phase: 'drawing', theme, conId, currentDrawer: gameState.players[0].id, drawerIndex: 0, round: 1, history: [], isPaused: false, turnExpiresAt: Date.now() + 30000
                 });
             };
 
             const finishTurn = async () => {
                 const nextIdx = (gameState.drawerIndex + 1) % gameState.players.length;
                 const nextRound = nextIdx === 0 ? gameState.round + 1 : gameState.round;
-                const updates = { history: [...gameState.history, ...currentStrokes], drawerIndex: nextIdx, currentDrawer: gameState.players[nextIdx].id, round: nextRound };
+                const updates = { history: [...gameState.history, ...currentStrokes], drawerIndex: nextIdx, currentDrawer: gameState.players[nextIdx].id, round: nextRound, turnExpiresAt: Date.now() + 30000 };
                 if (nextRound > 2) { updates.phase = 'voting'; updates.currentDrawer = ''; }
                 await updateDoc(doc(db, 'games', gameId), updates);
                 setCurrentStrokes([]);
@@ -278,15 +295,29 @@
                     <div className="flex-grow p-4 md:p-8 flex flex-col items-center">
                         <div className="w-full max-w-[800px] bg-white p-6 rounded-2xl shadow-sm mb-6 flex justify-between items-center border border-slate-200">
                             <div><p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Theme</p><h3 className="text-3xl font-black text-slate-800">{gameState.phase === 'drawing' ? (gameState.conId === user?.uid ? "🎭 ???" : gameState.theme) : "Voting Time"}</h3></div>
-                            <div className="text-right"><p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Round</p><span className="text-2xl font-black text-rose-500 font-mono">{gameState.round}/2</span></div>
+                            <div className="flex flex-col items-end">
+                                <div className="text-right mb-2"><p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Round</p><span className="text-2xl font-black text-rose-500 font-mono">{gameState.round}/2</span></div>
+                                {gameState.phase === 'drawing' && (
+                                    <div className="flex items-center gap-2 bg-slate-100 px-3 py-1 rounded-lg">
+                                        <Icon name="Clock" size={16} className="text-slate-500" />
+                                        <span className={`font-mono font-bold text-xl ${timeLeft < 10 ? 'text-rose-500 animate-pulse' : 'text-slate-700'}`}>{timeLeft}s</span>
+                                    </div>
+                                )}
+                            </div>
                         </div>
                         <div className="canvas-container bg-white rounded-3xl shadow-xl relative border-8 border-slate-200 overflow-hidden">
-                            <canvas ref={canvasRef} width={800} height={600} className="w-full bg-white" 
+                            <canvas ref={canvasRef} width={800} height={600} className="w-full bg-white"
                                 onMouseDown={(e) => {
                                     if (gameState.currentDrawer !== user?.uid) return;
                                     setIsDrawing(true); setLastPoint(getPos(e));
-                                    if(activeTool === 'fill') floodFill(canvasRef.current.getContext('2d'), Math.floor(getPos(e).x), Math.floor(getPos(e).y), gameState.players.find(p => p.id === user.uid).color);
-                                }} 
+                                    if(activeTool === 'fill') {
+                                        const x = Math.floor(getPos(e).x);
+                                        const y = Math.floor(getPos(e).y);
+                                        const color = gameState.players.find(p => p.id === user.uid).color;
+                                        floodFill(canvasRef.current.getContext('2d'), x, y, color);
+                                        setCurrentStrokes(p => [...p, { type: 'fill', x, y, color }]);
+                                    }
+                                }}
                                 onMouseMove={(e) => {
                                     if (!isDrawing || activeTool === 'fill') return;
                                     const pos = getPos(e); const ctx = canvasRef.current.getContext('2d');
@@ -294,12 +325,18 @@
                                     ctx.beginPath(); ctx.moveTo(lastPoint.x, lastPoint.y); ctx.lineTo(pos.x, pos.y); ctx.stroke();
                                     setCurrentStrokes(p => [...p, { type: 'stroke', x1: lastPoint.x, y1: lastPoint.y, x2: pos.x, y2: pos.y, color: ctx.strokeStyle }]);
                                     setLastPoint(pos);
-                                }} 
+                                }}
                                 onMouseUp={() => setIsDrawing(false)}
                                 onTouchStart={(e) => {
                                     if (gameState.currentDrawer !== user?.uid) return;
                                     setIsDrawing(true); setLastPoint(getPos(e));
-                                    if(activeTool === 'fill') floodFill(canvasRef.current.getContext('2d'), Math.floor(getPos(e).x), Math.floor(getPos(e).y), gameState.players.find(p => p.id === user.uid).color);
+                                    if(activeTool === 'fill') {
+                                        const x = Math.floor(getPos(e).x);
+                                        const y = Math.floor(getPos(e).y);
+                                        const color = gameState.players.find(p => p.id === user.uid).color;
+                                        floodFill(canvasRef.current.getContext('2d'), x, y, color);
+                                        setCurrentStrokes(p => [...p, { type: 'fill', x, y, color }]);
+                                    }
                                 }}
                                 onTouchMove={(e) => {
                                     if (!isDrawing || activeTool === 'fill') return;
@@ -334,7 +371,7 @@
                             )}
                         </div>
                         {myTurn && gameState.phase === 'drawing' && (
-                            <div className="w-full max-w-[800px] mt-6 flex gap-4 justify-center bg-slate-900 p-4 rounded-3xl shadow-2xl z-30">
+                            <div className="w-full max-w-[800px] mt-6 flex flex-wrap gap-4 justify-center bg-slate-900 p-4 rounded-3xl shadow-2xl z-30">
                                 <button onClick={() => setActiveTool('pen')} className={`p-4 rounded-2xl transition-all ${activeTool === 'pen' ? 'bg-rose-500 text-white shadow-lg shadow-rose-500/40' : 'bg-slate-700 text-slate-400 hover:text-white'}`}>
                                     <Icon name="Brush" size={24}/>
                                 </button>
