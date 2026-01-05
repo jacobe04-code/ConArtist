@@ -353,9 +353,20 @@
                                     <Icon name="Vote" size={64} className="mb-4 text-cyan-400 animate-bounce" />
                                     <h2 className="text-4xl font-black mb-8 text-center uppercase tracking-tighter">Who is the Con Artist?</h2>
                                     <div className="grid grid-cols-2 gap-4 w-full max-w-md">
-                                        {gameState.players.map(p => p.id !== user?.uid && (
-                                            <button key={p.id} onClick={() => handleVote(p.id)} className="bg-white/10 p-6 rounded-2xl border-2 border-white/20 font-bold hover:bg-white/20 transition-all text-lg">{p.name}</button>
-                                        ))}
+                                        {gameState.players.map(p => {
+                                            if (p.id === user?.uid) return null;
+                                            const myVote = gameState.players.find(mp => mp.id === user?.uid)?.vote;
+                                            const isSelected = myVote === p.id;
+                                            return (
+                                                <button
+                                                    key={p.id}
+                                                    onClick={() => handleVote(p.id)}
+                                                    className={`p-6 rounded-2xl border-2 font-bold transition-all text-lg ${isSelected ? 'bg-cyan-500 border-cyan-400 text-white shadow-lg scale-105' : 'bg-white/10 border-white/20 hover:bg-white/20'}`}
+                                                >
+                                                    {p.name}
+                                                </button>
+                                            );
+                                        })}
                                     </div>
                                 </div>
                             )}
