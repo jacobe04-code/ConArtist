@@ -83,7 +83,9 @@
         const appId = 'my-con-artist-production-v1';
 
         const THEMES = ['Cat', 'Tree', 'House', 'Car', 'Sun', 'Flower', 'Bird', 'Fish', 'Pizza', 'Guitar', 'Book', 'Clock', 'Shoe', 'Hat', 'Cup', 'Star', 'Rocket', 'Mountain', 'Butterfly', 'Elephant', 'Cactus', 'Donut', 'Volcano', 'Bicycle', 'Taco', 'Submarine', 'Ghost', 'Alien', 'Robot', 'Pineapple', 'Smartphone', 'Ice Cream', 'Umbrella', 'Pizza Slice', 'Hamburger'];
-        const PLAYER_COLORS = ['#E11D48', '#2563EB', '#059669', '#D97706', '#7C3AED', '#DB2777', '#0891B2', '#EA580C', '#4F46E5', '#16A34A'];
+        const PLAYER_COLORS = [
+            '#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#FF00FF', '#00FFFF', '#FF8000', '#800080', '#008080', '#FFC0CB', '#800000', '#808000', '#000080', '#C0C0C0'
+        ];
 
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
@@ -130,11 +132,26 @@
             const [errorMsg, setErrorMsg] = useState('');
             const canvasRef = useRef(null);
             const [timeLeft, setTimeLeft] = useState(30);
+            const [hideVoting, setHideVoting] = useState(false);
+            const currentStrokesRef = useRef(currentStrokes);
+
+            useEffect(() => {
+                currentStrokesRef.current = currentStrokes;
+            }, [currentStrokes]);
 
             useEffect(() => {
                 signInAnonymously(auth).catch(e => setErrorMsg("Auth Error: Check Firebase Config"));
                 return onAuthStateChanged(auth, setUser);
             }, []);
+
+            useEffect(() => {
+                if (!gameState) return;
+                if (gameState.phase === 'drawing') {
+                     const audio = new Audio('https://codeskulptor-demos.commondatastorage.googleapis.com/GalaxyInvaders/pause.wav');
+                     audio.volume = 0.5;
+                     audio.play().catch(e => console.log("Audio play failed", e));
+                }
+            }, [gameState?.phase]);
 
             useEffect(() => {
                 if (!gameState || gameState.phase !== 'drawing') return;
@@ -221,7 +238,8 @@
             const finishTurn = async () => {
                 const nextIdx = (gameState.drawerIndex + 1) % gameState.players.length;
                 const nextRound = nextIdx === 0 ? gameState.round + 1 : gameState.round;
-                const updates = { history: [...gameState.history, ...currentStrokes], drawerIndex: nextIdx, currentDrawer: gameState.players[nextIdx].id, round: nextRound, turnExpiresAt: Date.now() + 30000 };
+                const strokesToSave = currentStrokesRef.current;
+                const updates = { history: [...gameState.history, ...strokesToSave], drawerIndex: nextIdx, currentDrawer: gameState.players[nextIdx].id, round: nextRound, turnExpiresAt: Date.now() + 30000 };
                 if (nextRound > 2) { updates.phase = 'voting'; updates.currentDrawer = ''; }
                 await updateDoc(doc(db, 'games', gameId), updates);
                 setCurrentStrokes([]);
@@ -299,9 +317,16 @@
                             <div className="flex flex-col items-end">
                                 <div className="text-right mb-2"><p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Round</p><span className="text-2xl font-black text-rose-500 font-mono">{gameState.round}/2</span></div>
                                 {gameState.phase === 'drawing' && (
-                                    <div className="flex items-center gap-2 bg-slate-100 px-3 py-1 rounded-lg">
-                                        <Icon name="Clock" size={16} className="text-slate-500" />
-                                        <span className={`font-mono font-bold text-xl ${timeLeft < 10 ? 'text-rose-500 animate-pulse' : 'text-slate-700'}`}>{timeLeft}s</span>
+                                    <div className="flex items-center gap-2">
+                                        {gameState.currentDrawer === user?.uid && (
+                                            <button onClick={finishTurn} className="bg-emerald-500 text-white px-4 py-1 rounded-lg font-black text-sm hover:bg-emerald-600 transition-all active:scale-95 flex items-center gap-2 shadow-sm mr-2">
+                                                <Icon name="Check" size={16}/> DONE
+                                            </button>
+                                        )}
+                                        <div className="flex items-center gap-2 bg-slate-100 px-3 py-1 rounded-lg">
+                                            <Icon name="Clock" size={16} className="text-slate-500" />
+                                            <span className={`font-mono font-bold text-xl ${timeLeft < 10 ? 'text-rose-500 animate-pulse' : 'text-slate-700'}`}>{timeLeft}s</span>
+                                        </div>
                                     </div>
                                 )}
                             </div>
@@ -351,8 +376,11 @@
                                 }}
                                 onTouchEnd={() => setIsDrawing(false)}
                             />
-                            {gameState.phase === 'voting' && (
+                            {gameState.phase === 'voting' && !hideVoting && (
                                 <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-md flex flex-col items-center justify-center p-8 text-white z-10">
+                                    <button onClick={() => setHideVoting(true)} className="absolute top-4 right-4 bg-white/10 hover:bg-white/20 p-2 rounded-full transition-colors">
+                                        <Icon name="Eye" size={24} />
+                                    </button>
                                     <Icon name="Vote" size={64} className="mb-4 text-cyan-400 animate-bounce" />
                                     <h2 className="text-4xl font-black mb-8 text-center uppercase tracking-tighter">Who is the Con Artist?</h2>
                                     <div className="grid grid-cols-2 gap-4 w-full max-w-md">
@@ -371,6 +399,13 @@
                                             );
                                         })}
                                     </div>
+                                </div>
+                            )}
+                            {gameState.phase === 'voting' && hideVoting && (
+                                <div className="absolute top-4 right-4 z-20">
+                                     <button onClick={() => setHideVoting(false)} className="bg-slate-900/80 text-white p-3 rounded-full hover:bg-slate-800 transition-colors shadow-lg border border-white/20">
+                                        <Icon name="EyeOff" size={24} />
+                                    </button>
                                 </div>
                             )}
                             {gameState.phase === 'results' && (
@@ -409,10 +444,6 @@
                                     }
                                 }} className="p-4 rounded-2xl bg-slate-700 text-slate-400 hover:text-white transition-all">
                                     <Icon name="Undo2" size={24}/>
-                                </button>
-                                <div className="w-px bg-slate-700 mx-2" />
-                                <button onClick={finishTurn} className="bg-emerald-500 text-white px-10 rounded-2xl font-black text-lg hover:bg-emerald-600 transition-all active:scale-95 flex items-center gap-2">
-                                    <Icon name="Check" size={24}/> DONE!
                                 </button>
                             </div>
                         )}
